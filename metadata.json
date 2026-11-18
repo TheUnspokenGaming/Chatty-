@@ -1,0 +1,6 @@
+{
+  "name": "Chatty",
+  "description": "Chatty — End-to-end encrypted multi-channel spaces, voice lounges, direct messages, and temporary media sharing up to 4GB in a minimalist, card-based interface.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

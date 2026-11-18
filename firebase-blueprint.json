@@ -1,0 +1,237 @@
+{
+  "entities": {
+    "UserIdentity": {
+      "title": "UserIdentity",
+      "description": "Private authenticated user cryptographic identity, shareable Contact Code, and live presence status.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "displayName": { "type": "string" },
+        "contactCode": { "type": "string" },
+        "presenceStatus": { "type": "string", "enum": ["online", "focus", "dnd", "invisible"] },
+        "statusText": { "type": "string" },
+        "publicKeyFingerprint": { "type": "string" },
+        "publicKeyBase64": { "type": "string" },
+        "photoUrl": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "displayName", "publicKeyFingerprint", "publicKeyBase64", "createdAt", "updatedAt"]
+    },
+    "ContactDirectoryEntry": {
+      "title": "ContactDirectoryEntry",
+      "description": "Direct-lookup contact code record (no collection listing) enabling E2EE Direct Messaging initiation.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "displayName": { "type": "string" },
+        "contactCode": { "type": "string" },
+        "presenceStatus": { "type": "string", "enum": ["online", "focus", "dnd", "invisible"] },
+        "statusText": { "type": "string" },
+        "publicKeyFingerprint": { "type": "string" },
+        "photoUrl": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "displayName", "contactCode", "publicKeyFingerprint", "createdAt", "updatedAt"]
+    },
+    "ChatRoom": {
+      "title": "ChatRoom",
+      "description": "End-to-end encrypted multi-channel space with AES-256-GCM key metadata, roles, typing state, and slow-mode.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string" },
+        "name": { "type": "string" },
+        "topic": { "type": "string" },
+        "inviteCode": { "type": "string" },
+        "accentTag": { "type": "string", "enum": ["emerald", "cyan", "amber", "slate", "violet"] },
+        "roomKeyBase64": { "type": "string" },
+        "keyFingerprint": { "type": "string" },
+        "keyVersion": { "type": "integer" },
+        "memberUids": { "type": "array" },
+        "memberNames": { "type": "object" },
+        "memberRoles": { "type": "object" },
+        "typingUserIds": { "type": "array" },
+        "typingUpdatedAt": { "type": "string", "format": "date-time" },
+        "slowModeSeconds": { "type": "integer", "enum": [0, 5, 15, 60] },
+        "defaultTtlMinutes": { "type": "integer", "enum": [5, 60, 1440] },
+        "maxFileSizeBytes": { "type": "integer" },
+        "lastActivityPreviewCipher": { "type": "string" },
+        "lastActivityIv": { "type": "string" },
+        "lastSenderName": { "type": "string" },
+        "lastActivityAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerId", "name", "topic", "inviteCode", "accentTag",
+        "roomKeyBase64", "keyFingerprint", "keyVersion", "memberUids",
+        "defaultTtlMinutes", "maxFileSizeBytes", "lastActivityAt", "createdAt", "updatedAt"
+      ]
+    },
+    "RoomChannel": {
+      "title": "RoomChannel",
+      "description": "Structured channel inside an encrypted space: text, announcement stage, or E2EE voice lounge.",
+      "type": "object",
+      "properties": {
+        "roomId": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "name": { "type": "string" },
+        "channelType": { "type": "string", "enum": ["text", "voice", "announcement"] },
+        "topic": { "type": "string" },
+        "voiceParticipantUids": { "type": "array" },
+        "voiceParticipantNames": { "type": "object" },
+        "mutedUids": { "type": "array" },
+        "raisedHandUids": { "type": "array" },
+        "activeSpeakerUid": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["roomId", "ownerId", "name", "channelType", "topic", "voiceParticipantUids", "mutedUids", "raisedHandUids", "createdAt", "updatedAt"]
+    },
+    "RoomInvite": {
+      "title": "RoomInvite",
+      "description": "Secret single-get invite lookup mapping invite codes to encrypted rooms.",
+      "type": "object",
+      "properties": {
+        "roomId": { "type": "string" },
+        "roomName": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["roomId", "roomName", "ownerId", "createdAt"]
+    },
+    "EncryptedMessage": {
+      "title": "EncryptedMessage",
+      "description": "AES-256-GCM encrypted room message card supporting channels, replies, voice bursts, encrypted polls, reactions, edits, and pins.",
+      "type": "object",
+      "properties": {
+        "roomId": { "type": "string" },
+        "channelId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "memberUids": { "type": "array" },
+        "messageType": { "type": "string", "enum": ["text", "media", "system", "voice", "poll"] },
+        "ciphertextBase64": { "type": "string" },
+        "ivBase64": { "type": "string" },
+        "keyVersion": { "type": "integer" },
+        "mediaDropId": { "type": "string" },
+        "replyToMessageId": { "type": "string" },
+        "replyToSenderName": { "type": "string" },
+        "replyToSnippetCipher": { "type": "string" },
+        "replyToSnippetIv": { "type": "string" },
+        "reactions": { "type": "object" },
+        "pinned": { "type": "boolean" },
+        "edited": { "type": "boolean" },
+        "encryptedAudioBase64": { "type": "string" },
+        "audioIvBase64": { "type": "string" },
+        "audioDurationMs": { "type": "integer" },
+        "pollOptionCount": { "type": "integer" },
+        "pollVotes": { "type": "object" },
+        "status": { "type": "string", "enum": ["active", "burned"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["roomId", "senderId", "senderName", "memberUids", "messageType", "ciphertextBase64", "ivBase64", "keyVersion", "status", "createdAt", "updatedAt"]
+    },
+    "DirectThread": {
+      "title": "DirectThread",
+      "description": "Private 1-on-1 (or self-notes) AES-256-GCM encrypted direct thread with real-time typing indicators and read receipts.",
+      "type": "object",
+      "properties": {
+        "participantUids": { "type": "array" },
+        "participantNames": { "type": "object" },
+        "participantFingerprints": { "type": "object" },
+        "threadKeyBase64": { "type": "string" },
+        "keyFingerprint": { "type": "string" },
+        "keyVersion": { "type": "integer" },
+        "lastMessageCipher": { "type": "string" },
+        "lastMessageIv": { "type": "string" },
+        "lastMessageSenderId": { "type": "string" },
+        "lastReadByUids": { "type": "array" },
+        "typingUserIds": { "type": "array" },
+        "typingUpdatedAt": { "type": "string", "format": "date-time" },
+        "lastActivityAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["participantUids", "participantNames", "participantFingerprints", "threadKeyBase64", "keyFingerprint", "keyVersion", "lastReadByUids", "typingUserIds", "lastActivityAt", "createdAt", "updatedAt"]
+    },
+    "DirectMessage": {
+      "title": "DirectMessage",
+      "description": "AES-256-GCM encrypted direct message supporting replies, voice notes, 4GB drops, reactions, edits, pins, and per-message read receipts.",
+      "type": "object",
+      "properties": {
+        "threadId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "participantUids": { "type": "array" },
+        "messageType": { "type": "string", "enum": ["text", "media", "voice"] },
+        "ciphertextBase64": { "type": "string" },
+        "ivBase64": { "type": "string" },
+        "keyVersion": { "type": "integer" },
+        "mediaDropId": { "type": "string" },
+        "replyToMessageId": { "type": "string" },
+        "replyToSenderName": { "type": "string" },
+        "replyToSnippetCipher": { "type": "string" },
+        "replyToSnippetIv": { "type": "string" },
+        "reactions": { "type": "object" },
+        "pinned": { "type": "boolean" },
+        "edited": { "type": "boolean" },
+        "encryptedAudioBase64": { "type": "string" },
+        "audioIvBase64": { "type": "string" },
+        "audioDurationMs": { "type": "integer" },
+        "readByUids": { "type": "array" },
+        "readAt": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["active", "burned"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["threadId", "senderId", "senderName", "participantUids", "ciphertextBase64", "ivBase64", "keyVersion", "readByUids", "status", "createdAt", "updatedAt"]
+    },
+    "MediaDrop": {
+      "title": "MediaDrop",
+      "description": "Temporary AES-256-GCM encrypted media drop (up to 4.00 GB = 4,294,967,296 bytes) scoped to an encrypted room or direct thread.",
+      "type": "object",
+      "properties": {
+        "roomId": { "type": "string" },
+        "roomName": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "memberUids": { "type": "array" },
+        "fileName": { "type": "string" },
+        "mimeType": { "type": "string" },
+        "fileSizeBytes": { "type": "integer" },
+        "sha256Hash": { "type": "string" },
+        "cipherAlgorithm": { "type": "string" },
+        "ivBase64": { "type": "string" },
+        "encryptedPreviewBase64": { "type": "string" },
+        "previewIvBase64": { "type": "string" },
+        "ttlMinutes": { "type": "integer", "enum": [5, 60, 1440] },
+        "burnAfterView": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["active", "burned"] },
+        "viewedByUids": { "type": "array" },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "roomId", "roomName", "senderId", "senderName", "memberUids",
+        "fileName", "mimeType", "fileSizeBytes", "sha256Hash", "cipherAlgorithm",
+        "ivBase64", "ttlMinutes", "burnAfterView", "status", "viewedByUids",
+        "expiresAt", "createdAt", "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": { "schema": "UserIdentity", "description": "Private owner-only user identity & live presence." },
+    "/contact_directory/{contactCode}": { "schema": "ContactDirectoryEntry", "description": "Single-get contact lookup for starting E2EE direct threads." },
+    "/room_invites/{inviteCode}": { "schema": "RoomInvite", "description": "Single-get invite code lookup for joining encrypted spaces." },
+    "/rooms/{roomId}": { "schema": "ChatRoom", "description": "Encrypted multi-channel group space." },
+    "/rooms/{roomId}/channels/{channelId}": { "schema": "RoomChannel", "description": "Text, Announcement, or Voice Lounge channel inside a space." },
+    "/rooms/{roomId}/messages/{messageId}": { "schema": "EncryptedMessage", "description": "Encrypted room message cards (text, media, voice, polls)." },
+    "/direct_threads/{threadId}": { "schema": "DirectThread", "description": "Private 1-on-1 E2EE direct conversation with typing & read receipts." },
+    "/direct_threads/{threadId}/messages/{messageId}": { "schema": "DirectMessage", "description": "Encrypted direct message cards (text, media, voice)." },
+    "/media_drops/{dropId}": { "schema": "MediaDrop", "description": "Ephemeral 4.00 GB max encrypted media drops for Rooms and Direct Messages." }
+  }
+}

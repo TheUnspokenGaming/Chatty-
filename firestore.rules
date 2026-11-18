@@ -1,0 +1,674 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- GLOBAL HARDENED PRIMITIVES ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidStringList(listVal, minSize, maxSize) {
+      return listVal is list &&
+             listVal.size() >= minSize &&
+             listVal.size() <= maxSize &&
+             (listVal.size() == 0 || listVal[0] is string);
+    }
+
+    function isRoomMember(roomId) {
+      return exists(/databases/$(database)/documents/rooms/$(roomId)) &&
+             request.auth.uid in get(/databases/$(database)/documents/rooms/$(roomId)).data.memberUids;
+    }
+
+    function isRoomOwnerOrAdmin(roomId) {
+      let room = get(/databases/$(database)/documents/rooms/$(roomId)).data;
+      return exists(/databases/$(database)/documents/rooms/$(roomId)) &&
+             (room.ownerId == request.auth.uid ||
+              ('memberRoles' in room &&
+               room.memberRoles is map &&
+               request.auth.uid in room.memberRoles &&
+               room.memberRoles[request.auth.uid] in ['owner', 'admin']));
+    }
+
+    function isDirectParticipant(threadId) {
+      return exists(/databases/$(database)/documents/direct_threads/$(threadId)) &&
+             request.auth.uid in get(/databases/$(database)/documents/direct_threads/$(threadId)).data.participantUids;
+    }
+
+    // --- VALIDATION BLUEPRINTS (ANTI-UPDATE-GAP) ---
+
+    function isValidUserIdentity(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 60 &&
+             (!('contactCode' in data) || data.contactCode == null || (data.contactCode is string && data.contactCode.size() >= 6 && data.contactCode.size() <= 24 && data.contactCode.matches('^[A-Z0-9\\-]+$'))) &&
+             (!('presenceStatus' in data) || data.presenceStatus == null || (data.presenceStatus is string && data.presenceStatus in ['online', 'focus', 'dnd', 'invisible'])) &&
+             (!('statusText' in data) || data.statusText == null || (data.statusText is string && data.statusText.size() <= 80)) &&
+             data.publicKeyFingerprint is string && data.publicKeyFingerprint.size() >= 16 && data.publicKeyFingerprint.size() <= 128 &&
+             data.publicKeyBase64 is string && data.publicKeyBase64.size() >= 32 && data.publicKeyBase64.size() <= 512 &&
+             (!('photoUrl' in data) || data.photoUrl == null || (data.photoUrl is string && data.photoUrl.size() <= 500)) &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidContactEntry(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 60 &&
+             data.contactCode is string && data.contactCode.size() >= 6 && data.contactCode.size() <= 24 && data.contactCode.matches('^[A-Z0-9\\-]+$') &&
+             (!('presenceStatus' in data) || data.presenceStatus == null || (data.presenceStatus is string && data.presenceStatus in ['online', 'focus', 'dnd', 'invisible'])) &&
+             (!('statusText' in data) || data.statusText == null || (data.statusText is string && data.statusText.size() <= 80)) &&
+             data.publicKeyFingerprint is string && data.publicKeyFingerprint.size() >= 16 && data.publicKeyFingerprint.size() <= 128 &&
+             (!('photoUrl' in data) || data.photoUrl == null || (data.photoUrl is string && data.photoUrl.size() <= 500)) &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidChatRoom(data) {
+      return data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
+             data.name is string && data.name.size() >= 2 && data.name.size() <= 60 &&
+             data.topic is string && data.topic.size() <= 180 &&
+             data.inviteCode is string && data.inviteCode.size() >= 6 && data.inviteCode.size() <= 16 && data.inviteCode.matches('^[A-Z0-9]+$') &&
+             data.accentTag is string && data.accentTag in ['emerald', 'cyan', 'amber', 'slate', 'violet'] &&
+             data.roomKeyBase64 is string && data.roomKeyBase64.size() >= 32 && data.roomKeyBase64.size() <= 128 &&
+             data.keyFingerprint is string && data.keyFingerprint.size() >= 12 && data.keyFingerprint.size() <= 64 &&
+             data.keyVersion is int && data.keyVersion >= 1 && data.keyVersion <= 10000 &&
+             isValidStringList(data.memberUids, 1, 50) &&
+             (!('memberNames' in data) || data.memberNames == null || (data.memberNames is map && data.memberNames.size() <= 50)) &&
+             (!('memberRoles' in data) || data.memberRoles == null || (data.memberRoles is map && data.memberRoles.size() <= 50)) &&
+             (!('typingUserIds' in data) || data.typingUserIds == null || isValidStringList(data.typingUserIds, 0, 10)) &&
+             (!('typingUpdatedAt' in data) || data.typingUpdatedAt == null || (data.typingUpdatedAt is timestamp && data.typingUpdatedAt <= request.time)) &&
+             (!('slowModeSeconds' in data) || data.slowModeSeconds == null || (data.slowModeSeconds is int && data.slowModeSeconds in [0, 5, 15, 60])) &&
+             data.defaultTtlMinutes is int && data.defaultTtlMinutes in [5, 60, 1440] &&
+             data.maxFileSizeBytes is int && data.maxFileSizeBytes == 4294967296 &&
+             (!('lastActivityPreviewCipher' in data) || data.lastActivityPreviewCipher == null || (data.lastActivityPreviewCipher is string && data.lastActivityPreviewCipher.size() <= 1200)) &&
+             (!('lastActivityIv' in data) || data.lastActivityIv == null || (data.lastActivityIv is string && data.lastActivityIv.size() <= 64)) &&
+             (!('lastSenderName' in data) || data.lastSenderName == null || (data.lastSenderName is string && data.lastSenderName.size() <= 60)) &&
+             data.lastActivityAt is timestamp && data.lastActivityAt <= request.time &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidRoomChannel(data) {
+      return data.roomId is string && isValidId(data.roomId) &&
+             data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
+             data.name is string && data.name.size() >= 2 && data.name.size() <= 36 &&
+             data.channelType is string && data.channelType in ['text', 'voice', 'announcement'] &&
+             data.topic is string && data.topic.size() <= 140 &&
+             isValidStringList(data.voiceParticipantUids, 0, 25) &&
+             data.voiceParticipantNames is map && data.voiceParticipantNames.size() <= 25 &&
+             isValidStringList(data.mutedUids, 0, 25) &&
+             isValidStringList(data.raisedHandUids, 0, 25) &&
+             (!('activeSpeakerUid' in data) || data.activeSpeakerUid == null || (data.activeSpeakerUid is string && data.activeSpeakerUid.size() <= 128)) &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidRoomInvite(data) {
+      return data.roomId is string && isValidId(data.roomId) &&
+             data.roomName is string && data.roomName.size() >= 2 && data.roomName.size() <= 60 &&
+             data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isValidEncryptedMessage(data) {
+      return data.roomId is string && isValidId(data.roomId) &&
+             (!('channelId' in data) || data.channelId == null || (data.channelId is string && isValidId(data.channelId))) &&
+             data.senderId is string && data.senderId.size() >= 1 && data.senderId.size() <= 128 &&
+             data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 60 &&
+             isValidStringList(data.memberUids, 1, 50) &&
+             data.messageType is string && data.messageType in ['text', 'media', 'system', 'voice', 'poll'] &&
+             data.ciphertextBase64 is string && data.ciphertextBase64.size() >= 1 && data.ciphertextBase64.size() <= 12000 &&
+             data.ivBase64 is string && data.ivBase64.size() >= 12 && data.ivBase64.size() <= 64 &&
+             data.keyVersion is int && data.keyVersion >= 1 && data.keyVersion <= 10000 &&
+             (!('mediaDropId' in data) || data.mediaDropId == null || (data.mediaDropId is string && isValidId(data.mediaDropId))) &&
+             (!('replyToMessageId' in data) || data.replyToMessageId == null || (data.replyToMessageId is string && isValidId(data.replyToMessageId))) &&
+             (!('replyToSenderName' in data) || data.replyToSenderName == null || (data.replyToSenderName is string && data.replyToSenderName.size() <= 60)) &&
+             (!('replyToSnippetCipher' in data) || data.replyToSnippetCipher == null || (data.replyToSnippetCipher is string && data.replyToSnippetCipher.size() <= 1200)) &&
+             (!('replyToSnippetIv' in data) || data.replyToSnippetIv == null || (data.replyToSnippetIv is string && data.replyToSnippetIv.size() <= 64)) &&
+             (!('reactions' in data) || data.reactions == null || (data.reactions is map && data.reactions.size() <= 16)) &&
+             (!('pinned' in data) || data.pinned == null || data.pinned is bool) &&
+             (!('edited' in data) || data.edited == null || data.edited is bool) &&
+             (!('encryptedAudioBase64' in data) || data.encryptedAudioBase64 == null || (data.encryptedAudioBase64 is string && data.encryptedAudioBase64.size() <= 400000)) &&
+             (!('audioIvBase64' in data) || data.audioIvBase64 == null || (data.audioIvBase64 is string && data.audioIvBase64.size() <= 64)) &&
+             (!('audioDurationMs' in data) || data.audioDurationMs == null || (data.audioDurationMs is int && data.audioDurationMs >= 100 && data.audioDurationMs <= 180000)) &&
+             (!('pollOptionCount' in data) || data.pollOptionCount == null || (data.pollOptionCount is int && data.pollOptionCount >= 2 && data.pollOptionCount <= 5)) &&
+             (!('pollVotes' in data) || data.pollVotes == null || (data.pollVotes is map && data.pollVotes.size() <= 50)) &&
+             data.status is string && data.status in ['active', 'burned'] &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidDirectThread(data) {
+      return isValidStringList(data.participantUids, 1, 2) &&
+             data.participantNames is map && data.participantNames.size() >= 1 && data.participantNames.size() <= 2 &&
+             data.participantFingerprints is map && data.participantFingerprints.size() >= 1 && data.participantFingerprints.size() <= 2 &&
+             data.threadKeyBase64 is string && data.threadKeyBase64.size() >= 32 && data.threadKeyBase64.size() <= 128 &&
+             data.keyFingerprint is string && data.keyFingerprint.size() >= 12 && data.keyFingerprint.size() <= 64 &&
+             data.keyVersion is int && data.keyVersion >= 1 && data.keyVersion <= 10000 &&
+             (!('lastMessageCipher' in data) || data.lastMessageCipher == null || (data.lastMessageCipher is string && data.lastMessageCipher.size() <= 1200)) &&
+             (!('lastMessageIv' in data) || data.lastMessageIv == null || (data.lastMessageIv is string && data.lastMessageIv.size() <= 64)) &&
+             (!('lastMessageSenderId' in data) || data.lastMessageSenderId == null || (data.lastMessageSenderId is string && data.lastMessageSenderId.size() <= 128)) &&
+             isValidStringList(data.lastReadByUids, 0, 2) &&
+             isValidStringList(data.typingUserIds, 0, 2) &&
+             (!('typingUpdatedAt' in data) || data.typingUpdatedAt == null || (data.typingUpdatedAt is timestamp && data.typingUpdatedAt <= request.time)) &&
+             data.lastActivityAt is timestamp && data.lastActivityAt <= request.time &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidDirectMessage(data) {
+      return data.threadId is string && isValidId(data.threadId) &&
+             data.senderId is string && data.senderId.size() >= 1 && data.senderId.size() <= 128 &&
+             data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 60 &&
+             isValidStringList(data.participantUids, 1, 2) &&
+             (!('messageType' in data) || data.messageType == null || (data.messageType is string && data.messageType in ['text', 'media', 'voice'])) &&
+             data.ciphertextBase64 is string && data.ciphertextBase64.size() >= 1 && data.ciphertextBase64.size() <= 12000 &&
+             data.ivBase64 is string && data.ivBase64.size() >= 12 && data.ivBase64.size() <= 64 &&
+             data.keyVersion is int && data.keyVersion >= 1 && data.keyVersion <= 10000 &&
+             (!('mediaDropId' in data) || data.mediaDropId == null || (data.mediaDropId is string && isValidId(data.mediaDropId))) &&
+             (!('replyToMessageId' in data) || data.replyToMessageId == null || (data.replyToMessageId is string && isValidId(data.replyToMessageId))) &&
+             (!('replyToSenderName' in data) || data.replyToSenderName == null || (data.replyToSenderName is string && data.replyToSenderName.size() <= 60)) &&
+             (!('replyToSnippetCipher' in data) || data.replyToSnippetCipher == null || (data.replyToSnippetCipher is string && data.replyToSnippetCipher.size() <= 1200)) &&
+             (!('replyToSnippetIv' in data) || data.replyToSnippetIv == null || (data.replyToSnippetIv is string && data.replyToSnippetIv.size() <= 64)) &&
+             (!('reactions' in data) || data.reactions == null || (data.reactions is map && data.reactions.size() <= 16)) &&
+             (!('pinned' in data) || data.pinned == null || data.pinned is bool) &&
+             (!('edited' in data) || data.edited == null || data.edited is bool) &&
+             (!('encryptedAudioBase64' in data) || data.encryptedAudioBase64 == null || (data.encryptedAudioBase64 is string && data.encryptedAudioBase64.size() <= 400000)) &&
+             (!('audioIvBase64' in data) || data.audioIvBase64 == null || (data.audioIvBase64 is string && data.audioIvBase64.size() <= 64)) &&
+             (!('audioDurationMs' in data) || data.audioDurationMs == null || (data.audioDurationMs is int && data.audioDurationMs >= 100 && data.audioDurationMs <= 180000)) &&
+             isValidStringList(data.readByUids, 1, 2) &&
+             (!('readAt' in data) || data.readAt == null || (data.readAt is timestamp && data.readAt <= request.time)) &&
+             data.status is string && data.status in ['active', 'burned'] &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidMediaDrop(data) {
+      return data.roomId is string && isValidId(data.roomId) &&
+             data.roomName is string && data.roomName.size() >= 2 && data.roomName.size() <= 60 &&
+             data.senderId is string && data.senderId.size() >= 1 && data.senderId.size() <= 128 &&
+             data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 60 &&
+             isValidStringList(data.memberUids, 1, 50) &&
+             data.fileName is string && data.fileName.size() >= 1 && data.fileName.size() <= 200 &&
+             data.mimeType is string && data.mimeType.size() >= 3 && data.mimeType.size() <= 100 &&
+             data.fileSizeBytes is int && data.fileSizeBytes >= 1 && data.fileSizeBytes <= 4294967296 &&
+             data.sha256Hash is string && data.sha256Hash.size() == 64 && data.sha256Hash.matches('^[a-fA-F0-9]{64}$') &&
+             data.cipherAlgorithm is string && data.cipherAlgorithm == 'AES-256-GCM' &&
+             data.ivBase64 is string && data.ivBase64.size() >= 12 && data.ivBase64.size() <= 64 &&
+             (!('encryptedPreviewBase64' in data) || data.encryptedPreviewBase64 == null || (data.encryptedPreviewBase64 is string && data.encryptedPreviewBase64.size() <= 250000)) &&
+             (!('previewIvBase64' in data) || data.previewIvBase64 == null || (data.previewIvBase64 is string && data.previewIvBase64.size() <= 64)) &&
+             data.ttlMinutes is int && data.ttlMinutes in [5, 60, 1440] &&
+             data.burnAfterView is bool &&
+             data.status is string && data.status in ['active', 'burned'] &&
+             isValidStringList(data.viewedByUids, 0, 50) &&
+             data.expiresAt is timestamp &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    // --- 1. USER IDENTITY PROFILES (OWNER-ONLY) ---
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+      allow list: if isSignedIn() && request.auth.uid == userId;
+
+      allow create: if isSignedIn() &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().keys().hasAll(['userId', 'displayName', 'publicKeyFingerprint', 'publicKeyBase64', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'displayName', 'contactCode', 'presenceStatus', 'statusText',
+                         'publicKeyFingerprint', 'publicKeyBase64', 'photoUrl', 'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidUserIdentity(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       isValidUserIdentity(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'displayName', 'contactCode', 'presenceStatus', 'statusText',
+                         'publicKeyFingerprint', 'publicKeyBase64', 'photoUrl', 'updatedAt'
+                       ]);
+
+      allow delete: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+    }
+
+    // --- 1b. CONTACT DIRECTORY (SINGLE-GET ONLY, NO LISTING) ---
+    match /contact_directory/{contactCode} {
+      allow list: if false;
+      allow get: if isSignedIn() && isValidId(contactCode);
+
+      allow create: if isSignedIn() &&
+                       isValidId(contactCode) &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().contactCode == contactCode &&
+                       incoming().keys().hasAll(['userId', 'displayName', 'contactCode', 'publicKeyFingerprint', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'displayName', 'contactCode', 'presenceStatus', 'statusText',
+                         'publicKeyFingerprint', 'photoUrl', 'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidContactEntry(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(contactCode) &&
+                       existing().userId == request.auth.uid &&
+                       incoming().userId == existing().userId &&
+                       incoming().contactCode == existing().contactCode &&
+                       incoming().createdAt == existing().createdAt &&
+                       isValidContactEntry(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'displayName', 'presenceStatus', 'statusText', 'publicKeyFingerprint', 'photoUrl', 'updatedAt'
+                       ]);
+
+      allow delete: if isSignedIn() && isValidId(contactCode) && existing().userId == request.auth.uid;
+    }
+
+    // --- 2. SECRET ROOM INVITES (SINGLE-GET ONLY, NO LISTING) ---
+    match /room_invites/{inviteCode} {
+      allow list: if false;
+      allow get: if isSignedIn() && isValidId(inviteCode);
+
+      allow create: if isSignedIn() &&
+                       isValidId(inviteCode) &&
+                       incoming().keys().hasAll(['roomId', 'roomName', 'ownerId', 'createdAt']) &&
+                       incoming().keys().hasOnly(['roomId', 'roomName', 'ownerId', 'createdAt']) &&
+                       isValidRoomInvite(incoming()) &&
+                       incoming().ownerId == request.auth.uid &&
+                       exists(/databases/$(database)/documents/rooms/$(incoming().roomId)) &&
+                       get(/databases/$(database)/documents/rooms/$(incoming().roomId)).data.ownerId == request.auth.uid;
+
+      allow update: if false;
+
+      allow delete: if isSignedIn() && isValidId(inviteCode) && existing().ownerId == request.auth.uid;
+    }
+
+    // --- 3. ENCRYPTED MULTI-CHANNEL SPACES ---
+    match /rooms/{roomId} {
+      allow get: if isSignedIn() && isValidId(roomId) && request.auth.uid in existing().memberUids;
+      allow list: if isSignedIn() && request.auth.uid in existing().memberUids;
+
+      allow create: if isSignedIn() &&
+                       isValidId(roomId) &&
+                       incoming().keys().hasAll([
+                         'ownerId', 'name', 'topic', 'inviteCode', 'accentTag',
+                         'roomKeyBase64', 'keyFingerprint', 'keyVersion', 'memberUids',
+                         'defaultTtlMinutes', 'maxFileSizeBytes', 'lastActivityAt',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'ownerId', 'name', 'topic', 'inviteCode', 'accentTag',
+                         'roomKeyBase64', 'keyFingerprint', 'keyVersion', 'memberUids',
+                         'memberNames', 'memberRoles', 'typingUserIds', 'typingUpdatedAt',
+                         'slowModeSeconds', 'defaultTtlMinutes', 'maxFileSizeBytes',
+                         'lastActivityPreviewCipher', 'lastActivityIv', 'lastSenderName',
+                         'lastActivityAt', 'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidChatRoom(incoming()) &&
+                       incoming().ownerId == request.auth.uid &&
+                       incoming().keyVersion == 1 &&
+                       incoming().memberUids.size() == 1 &&
+                       incoming().memberUids[0] == request.auth.uid;
+
+      allow update: if isSignedIn() &&
+                       isValidId(roomId) &&
+                       isValidChatRoom(incoming()) &&
+                       incoming().ownerId == existing().ownerId &&
+                       incoming().inviteCode == existing().inviteCode &&
+                       incoming().maxFileSizeBytes == existing().maxFileSizeBytes &&
+                       incoming().createdAt == existing().createdAt && (
+                         // Action 1: Owner updates settings, roles, slow-mode, kick, or rotates room key
+                         (existing().ownerId == request.auth.uid &&
+                          incoming().keyVersion >= existing().keyVersion &&
+                          existing().ownerId in incoming().memberUids &&
+                          incoming().diff(existing()).affectedKeys().hasOnly([
+                            'name', 'topic', 'accentTag', 'roomKeyBase64',
+                            'keyFingerprint', 'keyVersion', 'defaultTtlMinutes',
+                            'memberUids', 'memberNames', 'memberRoles', 'slowModeSeconds', 'updatedAt'
+                          ])) ||
+                         // Action 2: Authorized member updates latest activity summary or typing indicator
+                         (request.auth.uid in existing().memberUids &&
+                          incoming().diff(existing()).affectedKeys().hasOnly([
+                            'lastActivityPreviewCipher', 'lastActivityIv', 'lastSenderName',
+                            'lastActivityAt', 'typingUserIds', 'typingUpdatedAt', 'updatedAt'
+                          ])) ||
+                         // Action 3: Authenticated user joins room via existing invite code
+                         (!(request.auth.uid in existing().memberUids) &&
+                          request.auth.uid in incoming().memberUids &&
+                          incoming().memberUids.size() == existing().memberUids.size() + 1 &&
+                          incoming().memberUids.hasAll(existing().memberUids) &&
+                          (!('memberRoles' in incoming()) ||
+                           !(request.auth.uid in incoming().memberRoles) ||
+                           incoming().memberRoles[request.auth.uid] == 'member') &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'memberNames', 'memberRoles', 'updatedAt']) &&
+                          exists(/databases/$(database)/documents/room_invites/$(existing().inviteCode))) ||
+                         // Action 4: Non-owner member leaves the room
+                         (request.auth.uid in existing().memberUids &&
+                          existing().ownerId != request.auth.uid &&
+                          !(request.auth.uid in incoming().memberUids) &&
+                          incoming().memberUids.size() == existing().memberUids.size() - 1 &&
+                          existing().memberUids.hasAll(incoming().memberUids) &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'updatedAt']))
+                       );
+
+      allow delete: if isSignedIn() && isValidId(roomId) && existing().ownerId == request.auth.uid;
+
+      // --- 3a. STRUCTURED CHANNELS & VOICE LOUNGES ---
+      match /channels/{channelId} {
+        allow get, list: if isSignedIn() && isValidId(roomId) && isRoomMember(roomId);
+
+        allow create: if isSignedIn() &&
+                         isValidId(roomId) &&
+                         isValidId(channelId) &&
+                         isRoomOwnerOrAdmin(roomId) &&
+                         incoming().roomId == roomId &&
+                         incoming().keys().hasAll([
+                           'roomId', 'ownerId', 'name', 'channelType', 'topic',
+                           'voiceParticipantUids', 'voiceParticipantNames',
+                           'mutedUids', 'raisedHandUids', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'roomId', 'ownerId', 'name', 'channelType', 'topic',
+                           'voiceParticipantUids', 'voiceParticipantNames',
+                           'mutedUids', 'raisedHandUids', 'activeSpeakerUid',
+                           'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidRoomChannel(incoming());
+
+        allow update: if isSignedIn() &&
+                         isValidId(roomId) &&
+                         isValidId(channelId) &&
+                         isRoomMember(roomId) &&
+                         isValidRoomChannel(incoming()) &&
+                         incoming().roomId == existing().roomId &&
+                         incoming().ownerId == existing().ownerId &&
+                         incoming().createdAt == existing().createdAt && (
+                           // Voice Lounge stage presence updates by any room member
+                           incoming().diff(existing()).affectedKeys().hasOnly([
+                             'voiceParticipantUids', 'voiceParticipantNames',
+                             'mutedUids', 'raisedHandUids', 'activeSpeakerUid', 'updatedAt'
+                           ]) ||
+                           // Owner/Admin renames channel or topic
+                           (isRoomOwnerOrAdmin(roomId) &&
+                            incoming().diff(existing()).affectedKeys().hasOnly(['name', 'topic', 'updatedAt']))
+                         );
+
+        allow delete: if isSignedIn() && isValidId(roomId) && isValidId(channelId) && isRoomOwnerOrAdmin(roomId);
+      }
+
+      // --- 3b. ENCRYPTED MESSAGE CARDS (TEXT, MEDIA, VOICE, POLLS) ---
+      match /messages/{messageId} {
+        allow get, list: if isSignedIn() && isValidId(roomId) && isRoomMember(roomId);
+
+        allow create: if isSignedIn() &&
+                         isValidId(roomId) &&
+                         isValidId(messageId) &&
+                         isRoomMember(roomId) &&
+                         incoming().keys().hasAll([
+                           'roomId', 'senderId', 'senderName', 'memberUids',
+                           'messageType', 'ciphertextBase64', 'ivBase64',
+                           'keyVersion', 'status', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'roomId', 'channelId', 'senderId', 'senderName', 'memberUids',
+                           'messageType', 'ciphertextBase64', 'ivBase64', 'keyVersion',
+                           'mediaDropId', 'replyToMessageId', 'replyToSenderName',
+                           'replyToSnippetCipher', 'replyToSnippetIv',
+                           'reactions', 'pinned', 'edited',
+                           'encryptedAudioBase64', 'audioIvBase64', 'audioDurationMs',
+                           'pollOptionCount', 'pollVotes',
+                           'status', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidEncryptedMessage(incoming()) &&
+                         incoming().roomId == roomId &&
+                         incoming().senderId == request.auth.uid &&
+                         incoming().status == 'active' &&
+                         request.auth.uid in incoming().memberUids &&
+                         incoming().memberUids == get(/databases/$(database)/documents/rooms/$(roomId)).data.memberUids;
+
+        allow update: if isSignedIn() &&
+                         isValidId(roomId) &&
+                         isValidId(messageId) &&
+                         isRoomMember(roomId) &&
+                         isValidEncryptedMessage(incoming()) &&
+                         existing().status == 'active' &&
+                         incoming().roomId == existing().roomId &&
+                         incoming().senderId == existing().senderId &&
+                         incoming().senderName == existing().senderName &&
+                         incoming().memberUids == existing().memberUids &&
+                         incoming().messageType == existing().messageType &&
+                         incoming().createdAt == existing().createdAt && (
+                           // Action 1: Sender burns/shreds their message card
+                           (existing().senderId == request.auth.uid &&
+                            incoming().status == 'burned' &&
+                            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'ciphertextBase64', 'ivBase64', 'updatedAt'])) ||
+                           // Action 2: Sender edits & re-encrypts their own message
+                           (existing().senderId == request.auth.uid &&
+                            incoming().status == 'active' &&
+                            incoming().edited == true &&
+                            incoming().diff(existing()).affectedKeys().hasOnly(['ciphertextBase64', 'ivBase64', 'edited', 'updatedAt'])) ||
+                           // Action 3: Any room member toggles emoji reactions or pins/unpins
+                           (incoming().status == 'active' &&
+                            incoming().diff(existing()).affectedKeys().hasOnly(['reactions', 'updatedAt'])) ||
+                           (incoming().status == 'active' &&
+                            incoming().diff(existing()).affectedKeys().hasOnly(['pinned', 'updatedAt'])) ||
+                           // Action 4: Any room member votes in an encrypted poll (anti-spoof: can only modify own UID entry)
+                           (existing().messageType == 'poll' &&
+                            incoming().status == 'active' &&
+                            incoming().diff(existing()).affectedKeys().hasOnly(['pollVotes', 'updatedAt']) &&
+                            incoming().pollVotes.diff(existing().pollVotes).affectedKeys().hasOnly([request.auth.uid]))
+                         );
+
+        allow delete: if isSignedIn() && isValidId(roomId) && isValidId(messageId) && existing().senderId == request.auth.uid;
+      }
+    }
+
+    // --- 4. END-TO-END ENCRYPTED DIRECT CONVERSATIONS ---
+    match /direct_threads/{threadId} {
+      // Allow checking existence of deterministic thread IDs before creation (resource == null)
+      allow get: if isSignedIn() && isValidId(threadId) &&
+                    (resource == null || request.auth.uid in existing().participantUids);
+      allow list: if isSignedIn() && request.auth.uid in existing().participantUids;
+
+      allow create: if isSignedIn() &&
+                       isValidId(threadId) &&
+                       incoming().keys().hasAll([
+                         'participantUids', 'participantNames', 'participantFingerprints',
+                         'threadKeyBase64', 'keyFingerprint', 'keyVersion',
+                         'lastReadByUids', 'typingUserIds', 'lastActivityAt',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'participantUids', 'participantNames', 'participantFingerprints',
+                         'threadKeyBase64', 'keyFingerprint', 'keyVersion',
+                         'lastMessageCipher', 'lastMessageIv', 'lastMessageSenderId',
+                         'lastReadByUids', 'typingUserIds', 'typingUpdatedAt',
+                         'lastActivityAt', 'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidDirectThread(incoming()) &&
+                       request.auth.uid in incoming().participantUids &&
+                       incoming().keyVersion == 1;
+
+      allow update: if isSignedIn() &&
+                       isValidId(threadId) &&
+                       request.auth.uid in existing().participantUids &&
+                       isValidDirectThread(incoming()) &&
+                       incoming().participantUids == existing().participantUids &&
+                       incoming().createdAt == existing().createdAt && (
+                         // Action 1: Typing indicator updates
+                         incoming().diff(existing()).affectedKeys().hasOnly(['typingUserIds', 'typingUpdatedAt', 'updatedAt']) ||
+                         // Action 2: Read receipt summary updates
+                         (request.auth.uid in incoming().lastReadByUids &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['lastReadByUids', 'updatedAt'])) ||
+                         // Action 3: New encrypted message summary updates
+                         (incoming().lastMessageSenderId == request.auth.uid &&
+                          incoming().diff(existing()).affectedKeys().hasOnly([
+                            'lastMessageCipher', 'lastMessageIv', 'lastMessageSenderId',
+                            'lastReadByUids', 'lastActivityAt', 'typingUserIds', 'typingUpdatedAt', 'updatedAt'
+                          ])) ||
+                         // Action 4: Direct session key rotation
+                         (incoming().keyVersion >= existing().keyVersion &&
+                          incoming().diff(existing()).affectedKeys().hasOnly([
+                            'threadKeyBase64', 'keyFingerprint', 'keyVersion', 'updatedAt'
+                          ]))
+                       );
+
+      allow delete: if isSignedIn() && isValidId(threadId) && request.auth.uid in existing().participantUids;
+
+      // --- 4a. DIRECT MESSAGES (TEXT, VOICE, 4GB MEDIA, REPLIES, REACTIONS, READ RECEIPTS) ---
+      match /messages/{messageId} {
+        allow get, list: if isSignedIn() && isValidId(threadId) && isDirectParticipant(threadId);
+
+        allow create: if isSignedIn() &&
+                         isValidId(threadId) &&
+                         isValidId(messageId) &&
+                         isDirectParticipant(threadId) &&
+                         incoming().keys().hasAll([
+                           'threadId', 'senderId', 'senderName', 'participantUids',
+                           'ciphertextBase64', 'ivBase64', 'keyVersion',
+                           'readByUids', 'status', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'threadId', 'senderId', 'senderName', 'participantUids', 'messageType',
+                           'ciphertextBase64', 'ivBase64', 'keyVersion', 'mediaDropId',
+                           'replyToMessageId', 'replyToSenderName', 'replyToSnippetCipher', 'replyToSnippetIv',
+                           'reactions', 'pinned', 'edited',
+                           'encryptedAudioBase64', 'audioIvBase64', 'audioDurationMs',
+                           'readByUids', 'readAt', 'status', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidDirectMessage(incoming()) &&
+                         incoming().threadId == threadId &&
+                         incoming().senderId == request.auth.uid &&
+                         incoming().status == 'active' &&
+                         request.auth.uid in incoming().readByUids &&
+                         incoming().participantUids == get(/databases/$(database)/documents/direct_threads/$(threadId)).data.participantUids;
+
+        allow update: if isSignedIn() &&
+                         isValidId(threadId) &&
+                         isValidId(messageId) &&
+                         isDirectParticipant(threadId) &&
+                         isValidDirectMessage(incoming()) &&
+                         existing().status == 'active' &&
+                         incoming().threadId == existing().threadId &&
+                         incoming().senderId == existing().senderId &&
+                         incoming().senderName == existing().senderName &&
+                         incoming().participantUids == existing().participantUids &&
+                         incoming().createdAt == existing().createdAt && (
+                           // Action 1: Recipient marks message as read
+                           (request.auth.uid in incoming().readByUids &&
+                            incoming().readByUids.hasAll(existing().readByUids) &&
+                            incoming().diff(existing()).affectedKeys().hasOnly(['readByUids', 'readAt', 'updatedAt'])) ||
+                           // Action 2: Sender shreds/burns their direct message
+                           (existing().senderId == request.auth.uid &&
+                            incoming().status == 'burned' &&
+                            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'ciphertextBase64', 'ivBase64', 'updatedAt'])) ||
+                           // Action 3: Sender edits & re-encrypts their own message
+                           (existing().senderId == request.auth.uid &&
+                            incoming().status == 'active' &&
+                            incoming().edited == true &&
+                            incoming().diff(existing()).affectedKeys().hasOnly(['ciphertextBase64', 'ivBase64', 'edited', 'updatedAt'])) ||
+                           // Action 4: Participant toggles reaction or pin
+                           (incoming().status == 'active' &&
+                            incoming().diff(existing()).affectedKeys().hasOnly(['reactions', 'updatedAt'])) ||
+                           (incoming().status == 'active' &&
+                            incoming().diff(existing()).affectedKeys().hasOnly(['pinned', 'updatedAt']))
+                         );
+
+        allow delete: if isSignedIn() && isValidId(threadId) && isValidId(messageId) && existing().senderId == request.auth.uid;
+      }
+    }
+
+    // --- 5. TEMPORARY ENCRYPTED MEDIA DROPS (4GB MAX — ROOMS & DIRECT MESSAGES) ---
+    match /media_drops/{dropId} {
+      allow get: if isSignedIn() && isValidId(dropId) && request.auth.uid in existing().memberUids;
+      allow list: if isSignedIn() && request.auth.uid in existing().memberUids;
+
+      allow create: if isSignedIn() &&
+                       isValidId(dropId) &&
+                       incoming().keys().hasAll([
+                         'roomId', 'roomName', 'senderId', 'senderName', 'memberUids',
+                         'fileName', 'mimeType', 'fileSizeBytes', 'sha256Hash',
+                         'cipherAlgorithm', 'ivBase64', 'ttlMinutes', 'burnAfterView',
+                         'status', 'viewedByUids', 'expiresAt', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'roomId', 'roomName', 'senderId', 'senderName', 'memberUids',
+                         'fileName', 'mimeType', 'fileSizeBytes', 'sha256Hash',
+                         'cipherAlgorithm', 'ivBase64', 'encryptedPreviewBase64',
+                         'previewIvBase64', 'ttlMinutes', 'burnAfterView', 'status',
+                         'viewedByUids', 'expiresAt', 'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidMediaDrop(incoming()) &&
+                       incoming().senderId == request.auth.uid &&
+                       incoming().status == 'active' &&
+                       incoming().viewedByUids.size() == 0 &&
+                       incoming().expiresAt > request.time &&
+                       request.auth.uid in incoming().memberUids && (
+                         (exists(/databases/$(database)/documents/rooms/$(incoming().roomId)) &&
+                          request.auth.uid in get(/databases/$(database)/documents/rooms/$(incoming().roomId)).data.memberUids &&
+                          incoming().memberUids == get(/databases/$(database)/documents/rooms/$(incoming().roomId)).data.memberUids) ||
+                         (exists(/databases/$(database)/documents/direct_threads/$(incoming().roomId)) &&
+                          request.auth.uid in get(/databases/$(database)/documents/direct_threads/$(incoming().roomId)).data.participantUids &&
+                          incoming().memberUids == get(/databases/$(database)/documents/direct_threads/$(incoming().roomId)).data.participantUids)
+                       );
+
+      allow update: if isSignedIn() &&
+                       isValidId(dropId) &&
+                       isValidMediaDrop(incoming()) &&
+                       existing().status == 'active' &&
+                       request.auth.uid in existing().memberUids &&
+                       incoming().roomId == existing().roomId &&
+                       incoming().roomName == existing().roomName &&
+                       incoming().senderId == existing().senderId &&
+                       incoming().senderName == existing().senderName &&
+                       incoming().memberUids == existing().memberUids &&
+                       incoming().fileName == existing().fileName &&
+                       incoming().mimeType == existing().mimeType &&
+                       incoming().fileSizeBytes == existing().fileSizeBytes &&
+                       incoming().sha256Hash == existing().sha256Hash &&
+                       incoming().cipherAlgorithm == existing().cipherAlgorithm &&
+                       incoming().ivBase64 == existing().ivBase64 &&
+                       incoming().ttlMinutes == existing().ttlMinutes &&
+                       incoming().burnAfterView == existing().burnAfterView &&
+                       incoming().expiresAt == existing().expiresAt &&
+                       incoming().createdAt == existing().createdAt && (
+                         // Action 1: Member views/decrypts drop
+                         (request.auth.uid in incoming().viewedByUids &&
+                          incoming().viewedByUids.hasAll(existing().viewedByUids) &&
+                          incoming().viewedByUids.size() <= existing().viewedByUids.size() + 1 &&
+                          ((!existing().burnAfterView &&
+                            incoming().status == 'active' &&
+                            incoming().diff(existing()).affectedKeys().hasOnly(['viewedByUids', 'updatedAt'])) ||
+                           (existing().burnAfterView &&
+                            incoming().status == 'burned' &&
+                            (!('encryptedPreviewBase64' in incoming()) || incoming().encryptedPreviewBase64 == null || incoming().encryptedPreviewBase64 == '') &&
+                            incoming().diff(existing()).affectedKeys().hasOnly(['viewedByUids', 'status', 'encryptedPreviewBase64', 'previewIvBase64', 'updatedAt'])))) ||
+                         // Action 2: Sender manually shreds drop, or any member finalizes an expired drop
+                         ((existing().senderId == request.auth.uid || request.time >= existing().expiresAt) &&
+                          incoming().status == 'burned' &&
+                          (!('encryptedPreviewBase64' in incoming()) || incoming().encryptedPreviewBase64 == null || incoming().encryptedPreviewBase64 == '') &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'encryptedPreviewBase64', 'previewIvBase64', 'updatedAt']))
+                       );
+
+      allow delete: if isSignedIn() && isValidId(dropId) && existing().senderId == request.auth.uid;
+    }
+  }
+}
